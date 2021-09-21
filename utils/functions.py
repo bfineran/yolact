@@ -127,7 +127,7 @@ class SavePath:
         epoch = params[-2]
         iteration = params[-1]
         
-        return SavePath(model_name, int(epoch), int(iteration))
+        return SavePath(model_name, epoch, iteration)
 
     @staticmethod
     def remove_interrupt(save_folder):

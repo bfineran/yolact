@@ -17,18 +17,21 @@ import torch.backends.cudnn as cudnn
 from utils import timer
 from utils.functions import MovingAverage, make_net
 
-# This is required for Pytorch 1.0.1 on Windows to initialize Cuda on some driver versions.
-# See the bug report here: https://github.com/pytorch/pytorch/issues/17108
-torch.cuda.current_device()
-
-# As of March 10, 2019, Pytorch DataParallel still doesn't support JIT Script Modules
-use_jit = torch.cuda.device_count() <= 1
-if not use_jit:
-    print('Multiple GPUs detected! Turning off JIT.')
+use_jit = False
 
 ScriptModuleWrapper = torch.jit.ScriptModule if use_jit else nn.Module
 script_method_wrapper = torch.jit.script_method if use_jit else lambda fn, _rcn=None: fn
 
+
+def decode(loc, priors):
+    variances = [0.1, 0.2]
+    boxes = torch.cat((priors[:, :2] + loc[:, :, :2] * variances[0] * priors[:, 2:], priors[:, 2:] * torch.exp(loc[:, :, 2:] * variances[1])), 2)
+
+    boxes_result1 = boxes[:, :, :2] - boxes[:, :, 2:] / 2
+    boxes_result2 = boxes[:, :, 2:] + boxes[:, :, :2]
+    boxes_result = torch.cat((boxes_result1, boxes_result2), 2)
+
+    return boxes_result
 
 
 class Concat(nn.Module):
@@ -476,7 +479,10 @@ class Yolact(nn.Module):
     
     def load_weights(self, path):
         """ Loads weights from a compressed save file. """
-        state_dict = torch.load(path)
+        if torch.cuda.is_available():
+            state_dict = torch.load(path)
+        else:
+            state_dict = torch.load(path, map_location=torch.device('cpu'))
 
         # For backward compatability, remove these (the new variable is called layers)
         for key in list(state_dict.keys()):
@@ -673,8 +679,11 @@ class Yolact(nn.Module):
                 else:
                     pred_outs['conf'] = F.softmax(pred_outs['conf'], -1)
 
-            return self.detect(pred_outs, self)
+            pred_outs['boxes'] = decode(pred_outs['loc'], pred_outs['priors']) # decode output boxes
 
+            pred_outs.pop('priors') # remove unused in postprocessing layers
+            pred_outs.pop('loc') # remove unused in postprocessing layers
+            return pred_outs
 
 
 

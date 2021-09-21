@@ -815,6 +815,9 @@ def set_cfg(config_name:str):
 
     # Note this is not just an eval because I'm lazy, but also because it can
     # be used like ssd300_config.copy({'max_size': 400}) for extreme fine-tuning
+    # if "darknet" in config_name:
+    #     config_name = 'yolact_darknet53_config'
+
     cfg.replace(eval(config_name))
 
     if cfg.name is None:
