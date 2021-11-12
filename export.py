@@ -35,7 +35,8 @@ optional arguments:
   --recipe RECIPE, -r RECIPE
                         Path or SparseZoo stub to the recipe used for training,
                         omit if no recipe used.
-  --convert-qat, -Q     Flag to convert a QAT(Quantization Aware Training) graph
+  --no-qat, -N          Flag to prevent conversion of a QAT(Quantization Aware
+                        Training) Graph to a Quantized Graph
   --batch-size BATCH_SIZE, -b BATCH_SIZE
                         The batch size to use while exporting the Model graph to
                         ONNX;Defaults to 1
@@ -69,12 +70,9 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-
 import torch
-
 from data import set_cfg
 from yolact import Yolact
-from sparseml.pytorch.optim import ScheduledModifierManager
 from sparseml.pytorch.utils import export_onnx
 
 
@@ -213,13 +211,9 @@ def export(args: ExportArgs):
     batch_shape = (args.batch_size, *args.image_shape)
     set_cfg(args.config)
     model = Yolact()
-
-    if args.recipe is not None:
-        manager = ScheduledModifierManager.from_yaml(file_path=args.recipe)
-        manager.apply(model)
-
+    model.export = True
     logging.debug(f"Loading state dict from checkpoint {args.checkpoint}")
-    model.load_state_dict(torch.load(args.checkpoint))
+    model.load_checkpoint(args.checkpoint, recipe=args.recipe)
     export_onnx(
         module=model,
         sample_batch=torch.randn(*batch_shape),
