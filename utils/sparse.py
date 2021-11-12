@@ -37,30 +37,16 @@ class SparseMLWrapper(object):
         self.logger = logger
 
         if self.enabled and rank in [-1, 0]:
-            def _logging_lambda(log_tag, log_val, log_vals, step, walltime):
-                if not wandb_logger or not wandb_logger.wandb:
-                    return
-
-                if log_val is not None:
-                    wandb_logger.log({log_tag: log_val})
-
-                if log_vals:
-                    wandb_logger.log(log_vals)
-
             self.manager.initialize_loggers(
                 [
                     SparsificationGroupLogger(
-                        lambda_func=_logging_lambda,
                         tensorboard=tb_writer,
-                    )
+                        wandb_={'project': 'yolact'} if wandb_logger else None
+
+                    ),
+
                 ]
             )
-
-            if wandb_logger and wandb_logger.wandb:
-                artifact = wandb_logger.wandb.Artifact('recipe', type='recipe')
-                with artifact.new_file('recipe.yaml') as file:
-                    file.write(str(self.manager))
-                wandb_logger.wandb.log_artifact(artifact)
 
     def modify(self, scaler, optimizer, model, dataloader):
         if self.enabled:

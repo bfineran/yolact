@@ -97,6 +97,7 @@ parser.add_argument('--fp16',
                     action='store_true',
                     help ='flag to switch on fp16 while training'
                     )
+parser.add_argument('--wandb', action='store_true', help="Flag to use wandb logging")
 
 parser.set_defaults(keep_latest=False, log=True, log_gpu=False, interrupt=True, autoscale=True)
 args = parser.parse_args()
@@ -228,7 +229,7 @@ def train():
 
     if args.resume and args.resume.lower() not in ("no", "false", "f", "0"):
         print('Resuming training, loading checkpoint {}...'.format(args.resume))
-        checkpoint_epoch, checkpoint_recipe = yolact_net.load_checkpoint(args.resume)
+        checkpoint_epoch, checkpoint_recipe, sparseml_wrapper = yolact_net.load_checkpoint(args.resume, args.recipe)
         start_epoch = 0
         if checkpoint_epoch and checkpoint_recipe: start_epoch = checkpoint_epoch
         if args.override_checkpoint_epoch: start_epoch = 0
@@ -239,9 +240,8 @@ def train():
         print('Initializing weights...')
         yolact_net.init_weights(backbone_path=args.save_folder + cfg.backbone.path)
         start_epoch= 0
-
-    sparseml_wrapper = SparseMLWrapper(yolact_net, args.recipe)
-    sparseml_wrapper.initialize(start_epoch=start_epoch)
+        sparseml_wrapper = SparseMLWrapper(yolact_net, args.recipe)
+        sparseml_wrapper.initialize(start_epoch=start_epoch)
 
     optimizer = optim.SGD(yolact_net.parameters(), lr=args.lr, momentum=args.momentum,
                           weight_decay=args.decay)
@@ -297,13 +297,16 @@ def train():
     half_precision = args.fp16 and args.device != 'cpu'
     scaler = amp.GradScaler(enabled=half_precision)
     sparseml_wrapper.initialize_loggers(logger, tb_writer=TensorBoardLogger,
-                                        wandb_logger=None, rank=-1)
+                                        wandb_logger=args.wandb, rank=-1)
     scaler = sparseml_wrapper.modify(scaler, optimizer, yolact_net, data_loader)
     num_epochs = sparseml_wrapper.check_epoch_override(num_epochs)
 
     max_steps = cfg.max_iter
     print(f"num epochs: {num_epochs}")
     print(f"Steps to train: {(num_epochs - start_epoch) * len(data_loader)}" )
+
+    # try-except so you can use ctrl+c to save early and stop training
+    # SparseML Integration
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -440,9 +443,7 @@ def train():
                 if epoch % args.validation_epoch == 0 and epoch > 0:
                     compute_validation_map(epoch, iteration, yolact_net, val_dataset, log if args.log else None)
 
-        # Compute validation mAP after training is finished
-        print("Computing val mAP after training:")
-        compute_validation_map(epoch, iteration, yolact_net, val_dataset, log if args.log else None)
+
     except KeyboardInterrupt:
         if args.interrupt:
             print('Stopping early. Saving network...')
@@ -462,6 +463,10 @@ def train():
         recipe=sparseml_wrapper.state_dict().get('recipe'),
         epoch=epoch,
     )
+    # Compute validation mAP after training is finished
+    print("Computing val mAP after training:")
+    compute_validation_map(epoch, iteration, yolact_net, val_dataset,
+                           log if args.log else None)
 
 
 

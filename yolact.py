@@ -19,12 +19,14 @@ from utils.functions import MovingAverage, make_net
 
 # This is required for Pytorch 1.0.1 on Windows to initialize Cuda on some driver versions.
 # See the bug report here: https://github.com/pytorch/pytorch/issues/17108
+from utils.sparse import SparseMLWrapper
+
 torch.cuda.current_device()
 
 # As of March 10, 2019, Pytorch DataParallel still doesn't support JIT Script Modules
-use_jit = torch.cuda.device_count() <= 1
+use_jit = False
 if not use_jit:
-    print('Multiple GPUs detected! Turning off JIT.')
+    print('JIT turned off')
 
 ScriptModuleWrapper = torch.jit.ScriptModule if use_jit else nn.Module
 script_method_wrapper = torch.jit.script_method if use_jit else lambda fn, _rcn=None: fn
@@ -400,7 +402,7 @@ class Yolact(nn.Module):
         super().__init__()
 
         self.backbone = construct_backbone(cfg.backbone)
-
+        self.export = False # to support onnx exports
         if cfg.freeze_bn:
             self.freeze_bn()
 
@@ -479,17 +481,18 @@ class Yolact(nn.Module):
                      }
         torch.save(checkpoint, path)
 
-    def load_checkpoint(self, path) -> Tuple[Optional[int], Optional[str]]:
+    def load_checkpoint(self, path, recipe=None) -> Tuple[Optional[int], Optional[str], SparseMLWrapper]:
         """ Loads weights into the current Yolact object.
 
         :return: A tuple containing the epoch and the recipe if
-            found in the checkpoint
+            found in the checkpoint, and a SparseML Wrapper instance
         """
 
         checkpoint = torch.load(path)
-        state_dict = checkpoint.get('model_state_dict', checkpoint)
         epoch = checkpoint.get('epoch')
-        recipe = checkpoint.get('recipe')
+        recipe = recipe or checkpoint.get('recipe')
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        sparseml_wrapper = SparseMLWrapper(self, recipe)
 
         # For backward compatability, remove these (the new variable is called layers)
         for key in list(state_dict.keys()):
@@ -500,8 +503,19 @@ class Yolact(nn.Module):
             if key.startswith('fpn.downsample_layers.'):
                 if cfg.fpn is not None and int(key.split('.')[2]) >= cfg.fpn.num_downsample:
                     del state_dict[key]
-        self.load_state_dict(state_dict)
-        return epoch or 0, recipe
+
+        loaded = False
+        if self.export:
+            sparseml_wrapper.apply()
+        else:
+            quantized_state_dict = any([name.endswith('.zero_point') for name in state_dict.keys()])
+            if not quantized_state_dict:
+                self.load_state_dict(state_dict)
+
+                loaded = True
+            sparseml_wrapper.initialize(start_epoch=epoch)
+        if not loaded: self.load_state_dict(state_dict=state_dict)
+        return epoch or 0, recipe, sparseml_wrapper
 
     def init_weights(self, backbone_path):
         """ Initialize weights for training. """
@@ -687,6 +701,8 @@ class Yolact(nn.Module):
                 else:
                     pred_outs['conf'] = F.softmax(pred_outs['conf'], -1)
 
+            if self.export:
+                return pred_outs
             return self.detect(pred_outs, self)
 
 
