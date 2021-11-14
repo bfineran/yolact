@@ -1,0 +1,29 @@
+# version: 1.0.0
+
+num_epochs: &num_epochs 4
+
+quantization_start_epoch: &quantization_start_epoch 0
+quantization_init_lr: &quantization_init_lr 0.000001
+
+training_modifiers:
+  - !EpochRangeModifier
+    start_epoch: 0.0
+    end_epoch: *num_epochs
+  - !SetLearningRateModifier
+    start_epoch: *quantization_start_epoch
+    learning_rate: *quantization_init_lr
+  - !SetWeightDecayModifier
+    start_epoch: *quantization_start_epoch
+    weight_decay: 0.0
+
+
+pruning_modifiers:
+  - !ConstantPruningModifier
+    start_epoch: 0.0
+    params: __ALL_PRUNABLE__
+
+quantization_modifiers:
+  - !QuantizationModifier
+    start_epoch: *quantization_start_epoch
+    disable_quantization_observer_epoch: 3.0
+    freeze_bn_stats_epoch: 3.0
