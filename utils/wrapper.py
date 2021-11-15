@@ -1,5 +1,8 @@
+import contextlib
+
 import torch
-from deepsparse import compile_model
+with contextlib.suppress(ModuleNotFoundError):
+    from deepsparse import compile_model
 
 from layers import Detect
 from yolact import FastMaskIoUNet
