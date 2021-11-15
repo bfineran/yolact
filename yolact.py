@@ -513,7 +513,7 @@ class Yolact(nn.Module):
                 self.load_state_dict(state_dict)
 
                 loaded = True
-            sparseml_wrapper.initialize(start_epoch=epoch)
+            sparseml_wrapper.initialize(start_epoch=epoch or 0)
         if not loaded: self.load_state_dict(state_dict=state_dict)
         return epoch or 0, recipe, sparseml_wrapper
 
